@@ -10,6 +10,7 @@
 \usepackage{listings}
 \usepackage{rotating,afterpage}
 
+
 \lstset{language=bash,numbers=left,
 		numberstyle=\tiny ,
 		stepnumber=1,
@@ -48,7 +49,7 @@
 
 \begin{document}
 
-\title{Running the PSA64 Power Spectrum Pipeline}
+\title{Running the PAPER Power Spectrum Pipeline}
 
 \DeclareAffil{asu}{Department of Physics, Arizona State University, Tempe, AZ 85203}
 \DeclareAffil{sese}{School of Earth and Space Exploration, Arizona State University, Tempe, AZ 85203}
@@ -61,288 +62,138 @@
 	
 	
 \maketitle	
-Here I present an overview of the PAPER power spectrum pipeline used in creating the A15 and K16 power spectra. This memo aims to clarify the multiple steps of the pipeline including: setting up your configuration file, selecting data, and running signal loss scripts. I will conclude with a brief discussion on using the psa128 pipeline.
+Here I present an overview of the PAPER power spectrum pipeline used in creating the A15 and K17 power spectra. This memo aims to clarify the multiple steps of the pipeline including including the use of the sigloss calculations in power spectrum estimation
 \newline
 
-\section{PSA64 Power Spectrum Pipeline}{
-The psa64 pipeline relies on two files found in capo/pspec\_pipeline/:
+\section{PAPER Power Spectrum Pipeline}{
+The psa64 pipeline relies on four files found in capo/pspec\_pipeline/:
 
 
 \begin{enumerate}
-\item the configuration file: pspec\_psa128.cfg
-\item the bash power script: mk\_psa128\_pspec.sh
+\item the bash script: sigloss\_bash\_v2.sh
+\item the main pspec and sigloss script: sigloss\_sim.py
+\item the boot strapping script: boots\_to\_pspec.py
+\item Upper limit estimator: sigloss\_limits.py
 \end{enumerate}
-\subsection{Configuration File} 
-{
-The configuration file is used to define key parameters used in the making of the power spectrum. Table \ref{tab:parms} provides a list of all parameters, their descriptions and some examples.
 
-
-\begin{sidewaystable}[h]
+\subsection{sigloss\_bash\_v2}{
+The bash script runs the other three parts of the power spectrum pipeline and requires some parameters be set to properly estimate the power spectrum.
+\begin{table}[h]
 \centering
-\begin{tabular}{c | c}
-Parameter & Description  \\
-\hline 
-     &  Title of output directory, figures and save files (npz)\\
-PREFIX & Recommend adding the Date for easy logging \\
-     & e.g Mar30\_optimal\_frf \\ \hline
-	%& I like to use something descriptive about the power spectrum too \\ \hline
-pols & 	 The polarization you wish to analyze \\
-	 & options like I, XX, YY, XY \\ \hline
-     & the antenna separations to be used sep0,1 sep1,1 sep-1,1 etc\\
-seps & your data directory should have these as subdirectories\\ 
-	 & the pipeline looks for these directories to collect data\\ \hline
-      & channel ranges to be analyzed \\
-chans & can be singe channel range: 95\_115 \\
-      & or list of ranges: 30\_50 51\_71 78\_98  103\_123 127\_147  \\ \hline     
-	 & Antennas to analyze in pspec \\
-ANTS	 & can be set to any AIPY compliant antenna value\\
-	 & use 'cross' as default \\ \hline
-LST  & The RA (LST) of nights you wish to analyze \\
- 	& expects input to be a range: .4\_9 \\
- \hline
-NBOOT & Number of bootstraps to perform \\ \hline
-FILEAPPELLATION & file suffix \\
-			    & e.g. uvGAL uvG uvGL uvGLS uvGLAS etc \\ \hline
-EVEN\_GLOB & A bash glob of even files \\
-		  & e.g. lst.*242.[3456]* \\ \hline
-ODD\_GLOB & A bash glob of odd files \\
-		  & e.g. lst.*243.[3456]* \\ \hline
-	& signal loss correction factor \\
-covs & must have same length as chans keyword\\
-	 & e.g '1.02 1.2 1.30 1.37 1.24'\\ 
-	  & no input ('') defaults to 1.0 for all chans 
+\normalsize
+\begin{tabular}{l | c}
+Parameter & Description \\ \hline
+PREFIX & path pointing to data folder\\
+EVEN\_FILES & path and glob of even files\\
+ODD\_FILES & path and glob of odd files\\
+WD & the PWD command\\
+noise & boolean used to make noise simulations of pspec \\
+boot & number of bootstraps \\
+chans & list of channel ranges in capo chan option format (e.g. 95\_115) \\
+rmbls & list of baselines to remove in i,j pairs (e.g. 0\_44) \\
+t\_eff & the effective integration time, in number of time bins \\
+bl\_length & baseline length in meters \\
+SEP & Separation type (e.g. 0,1)
 \end{tabular}
-\begin{tabular}{c | c}
-Parameter & Description  \\ \hline 
-      & amplitude of noise to inject \\
- noise	  & must have same length as chan\\
- 	  & or null for no noise\\ \hline
-FILTER\_NOISE & Boolean \\
-	  & True to fringe rate filter injected noise\\ \hline
-NOISE\_ONLY & Boolean \\
-	  & True to replace data with noise when injecting \\ \hline
-USE\_pI & Boolean \\
-	   & True to use pI in pspec\_cov\_v???.py \\ \hline
-SCRIPTSDIR &  Path to directory where scripts are located\\ \hline
-cal & the name of the cal file to use \\ 
-	&  must be in your path or your python sys.path \\ \hline
-PWD & pwd command given to script for logging \\ \hline
-EVEN\_DATAPATH & path to even nights \\ \hline
-ODD\_DATAPATH & path to odd nights\\ \hline 
- 	& Window function to multiply data by \\ \hline
-WINDOW 	& e.g. Blackman-Harris, Kaiser3\\
-	& current default is none\\ \hline
- PLOT & Boolean to plot to X-window \\
- 	& True or False \\ \hline
-COV  & Boolean to turn On and Off covariance \\
-	& True or False\\ \hline
-BOOT & Boolean to turn on and off bootstrapping \\
-	& True or False \\ \hline
-KPKPLOT & Boolean to turn on and off plotting\\
-		& True or False
-\end{tabular}
-	
-\caption{\label{tab:parms}List of Parameters used in configuration file for use with mk\_psa128\_pspec.sh}
-\end{sidewaystable}
-
-
-Inside of the configuration file, either the EVEN\_GLOB and ODD\_GLOB keywords or the LST keyword should be set. The globs should be use to manually pick data files to use, these keywords take preference over the lst\_select script. 
-Inside your configuration file, all parameters must be given in the form:
-
-\begin{figure}[h!]
-\centering
-\begin{lstlisting}[numbers=none]
- export PARAMETER='STRING OF PARAMETER VALUE'
-\end{lstlisting}
-
-\end{figure}
- 
-\clearpage
-A sample config file would look like this:
-
-
-\begin{tabular}{c}
-\begin{lstlisting}[name='pspec_psa128.cfg']
-#this file configures a pspec run
-# run with mk_pspec.sh <this file>
-
-
-export PREFIX='Apr22_optimal_frf_test_noise_only_31Jy'
-
-#chans=`python -c "print ' '.join(['%d_%d'%(i,i+39) for i in range(10,150,1)])"`
-export pols='I'
-export seps='sep0,1 sep1,1 sep-1,1'
-#export chans='30_50 51_71 78_98 95_115 103_123 127_147'
-export chans='95_115'
-export ANTS='cross'
-#export chans='95_115'
-#export RA="1:01_9:00"
-export NBOOT=100
-export FILEAPPELLATION='uvGAL'
-
-## use EVEN_GLOB and ODD_GLOB to manually select data
-## script will use manaul glob over lst_select
-export EVEN_GLOB='lst.*242.[3456]*'
-export ODD_GLOB='lst.*243.[3456]*'
-export LST="-.1_8.75"
-
-#signal loss correction factor
-#export covs='1.20 1.19 1.23 1.22 1.24 1.28'
-#export covs='1.62 1.35 1.30 1.30 1.28 1.35'
-export covs='1.26'
-
-##amplitude of injected noise in Jansky
-export noise='30'
-##Fringe Rate Filter noise before injection
-export FILTER_NOISE=True
-#instead of injecting noise, override data with noise
-export NOISE_ONLY=True
-
-#replace pC with pI in pspec_cov_boot_v???.py
-export USE_pI=False
-
-#DATAPATH=fringe_hor_v006
-export SCRIPTSDIR=~/src/capo/pspec_pipeline
-export cal='psa6240_v003'
-export PWD=`pwd`
-export EVEN_DATAPATH="${PWD}/lstbin_psa64_ali_optimal/even"
-export ODD_DATAPATH="${PWD}/lstbin_psa64_ali_optimal/odd"
-export WINDOW='none'
-
-#to separately run scripts
-export PLOT=False #to plot things in COV and BOOT scripts
-export COV=True
-export BOOT=True
-export KPKPLOT=True
-
-
-\end{lstlisting}
-\end{tabular}
-}
-\subsection{Running the Bash Script}{
-Now we have our configuration file set, we need to get ready to run the power spectrum. With how the sample config file is set, we should compute the power spectrum in the directory which contains the data folder (lstbin\_psa64\_ali\_nofrf). Once in the correct directory, we can run the bash script with the command:
-
-\begin{figure}[h!]
-\centering
-\begin{lstlisting}[numbers=none]
-user@folio /path/to/script/mk_psa128_pspec.sh /path/to/config/pspec_psa128.cfg
-\end{lstlisting}
-\end{figure}
-
-
-if we are running this directly from the capo/pspec\_pipeline directory it will look like:
-\begin{figure}[h!]
-\centering
-\begin{lstlisting}[numbers=none]
-user@folio /path/to/capo/pspec_pipeline/mk_psa128_pspec.sh /path/to/capo/pspec_pipeline/pspec_psa128.cfg
-\end{lstlisting}
-\end{figure}
-}
-}
-
-
-%\begin{deluxetable}{c | l }
-%\centering
-%\tablecaption{List of Parameters used in signal loss configuration file for use with make\_sigloss.sh}
-%\tablecolumns{2}
-%\tablehead{
-%\colhead{Parameter} &
-%\colhead{Description}
-%}
-%\startdata
-\begin{table}[ht]
-\centering
-\begin{tabular}{c | c}
-Parameter & Description \\ \hline \hline
-     &  Title of your output director, figures and save files (npz)  \tabularnewline
-PREFIX & Recommend adding the Date in your prefix for easy logging \tabularnewline
-     & e.g Mar30\_sigloss\_optimal\_frf \tabularnewline \hline
-PSPEC & This is the name of the power spectrum we computed before\tabularnewline
-	 & probably the same as PREFIX from your pspec\_psa128.cfg file\tabularnewline \hline
- PLOT & N/A\tabularnewline \hline
-COV  &  N/A \tabularnewline \hline
-BOOT &  N/A \tabularnewline \hline
-KPKPLOT & N/A\tabularnewline
-\end{tabular}
-\caption{\label{tab:sig_parms}List of Parameters used in signal loss configuration file for use with make\_sigloss.sh}
 \end{table}
-%\enddata
-%\label{tab:sig_parms}
-%\end{deluxetable}
 
-
-
-
-\section{Signal Loss}
-{
-The signal loss calculation also relies on two main files:
-\begin{enumerate}
-\item the configuration file: sigloss\_psa64.cfg
-\item the bash power script: make\_sigloss.sh
-\end{enumerate}
-
-The signal loss configuration file has a few differences outlined in Table \ref{tab:sig_parms}
-
-
-
-
-A sample signal loss config file looks like: 
-
-
-
-\begin{lstlisting}[name='sigloss_psa128.cfg']
-#this file configures a pspec run
-# run with mk_pspec.sh <this file>
-
-
-export PREFIX='Mar30_sigloss_optimal_frf'
-export PSPEC='Mar30_optimal_frf'
-
-#chans=`python -c "print ' '.join(['%d_%d'%(i,i+39) for i in range(10,150,1)])"`
-export pols='I'
-#export seps='sep0,1 sep-1,1 sep1,1'
-export seps='sep0,1'
-export chans='30_50 51_71 78_98 95_115 103_123 127_147'
-ANTS='cross'
-#export chans='95_115'
-#export RA="1:01_9:00"
-export NBOOT=40
-export FILEAPPELLATION='uvGAL'
-
-## use EVEN_GLOB and ODD_GLOB to manually select data
-## script will use manaul glob over lst_select
-export EVEN_GLOB='lst.*242.[3456]*'
-export ODD_GLOB='lst.*243.[3456]*'
-export LST="-.1_8.75"
-
-#DATAPATH=fringe_hor_v006
-export SCRIPTSDIR=~/capo/pspec_pipeline
-export cal='psa6240_v003'
-export PWD=`pwd`
-export EVEN_DATAPATH="${PWD}/lstbin_psa64_ali_nofrf/even"
-export ODD_DATAPATH="${PWD}/lstbin_psa64_ali_nofrf/odd"
-export WINDOW='none'
-\end{lstlisting}
-\ \newline
-
-Running signal loss is very similar to the power spectrum:
-
-\begin{figure}[h!]
-\begin{lstlisting}[numbers=none]
-user@folio /path/to/script/make_sigloss.sh /path/to/config/sigloss_psa128.cfg
+here's what a sample bash configuration will look like:
+\begin{figure}[h]
+\centering
+\begin{lstlisting}[firstnumber=0,name=sigloss_bash_v2.sh, caption={sigloss\_bash\_v2.sh},
+fontadjust,linewidth=15cm,xleftmargin=.2\textwidth]
+PREFIX='../../../../exp_vs_inttime/lstbin_psa64_data_optimal'
+EVEN_FILES=${PREFIX}'/even/sep0,1/lst*242.[3456]*.uvGAL'
+ODD_FILES=${PREFIX}'/odd/sep0,1/lst*243.[3456]*.uvGAL'
+WD=$PWD #get the sworking directory
+noise=''
+boot=60
+chans='95_115'
+rmbls='15_16,0_26,0_44,16_62,3_10,3_25'
+t_eff=69
+bl_length=30
+SEP='0,1'
 \end{lstlisting}
 \end{figure}
 
-if we are running this directly from the capo/pspec\_pipeline directory it will look like:
-
-\begin{figure}[h!]
-\begin{lstlisting}[numbers=none]
-user@folio /path/to/capo/pspec_pipeline/make_sigloss.sh /path/to/capo/pspec_pipeline/sigloss_psa128.cfg
+The remainder of the bash script executes the other files
+with the configurations set above.
+One additional line in the script is used to configure the 
+injections used in the signal loss interactions:
+\begin{figure}[h]
+\centering
+\begin{lstlisting}[firstnumber=40,name=sigloss_bash_v2.sh,
+caption={sigloss\_bash\_v2.sh}]
+    for inject in `python -c "import numpy; print ' '.join(map(str, numpy.logspace(-2,3,30)))"` ; do
 \end{lstlisting}
 \end{figure}
 
-The signal loss script will output the maximum signal loss correction factors it calculates inside of the log file for each channel/polarization combination. These correction factors can be put back into the 'covs' keyword of the power spectrum configuration file to correct the output power spectrum.
+Changing the logspace beginning, end and number of points
+will affect the number and range of injections.
 }
 
+
+\subsection{sigloss\_sim}{
+The main power spectrum and signal loss estimation script.
+This script has a few parameters still hard-coded in unfortunately.
+
+\begin{table}[h]
+\centering
+\normalsize
+\begin{tabular}{l | c}
+Parameter & Description \\ \hline
+LST\_STATS & Boolean to collected metadata from lst binning\\
+DELAY & Boolean to take delay transform\\
+NGPS & Number of groups used in bootstrapping\\
+cov\_reg\_level & scaling factor of identity to add to covariance before inversion\\
+\end{tabular}
+\end{table}
+other parameters previously set with this script are now
+passed in via the command line option parser. 
+
+An example of the configuration inside sigloss\_sim.py looks like: 
+
+\begin{figure}[h]
+\centering
+\begin{lstlisting}[firstnumber=36,name=sigloss_sim.py,fontadjust,
+linewidth=12cm,xleftmargin=.3\textwidth,caption={sigloss\_sim.py}]
+random.seed(0)
+POL = opts.pol  # 'I'
+LST_STATS = False
+DELAY = False
+NGPS = 5
+INJECT_SIG = opts.inject_sig
+PLOT = opts.plot
+cov_reg_level = 1e-10
+\end{lstlisting}
+\end{figure}
+
+
+}
+
+
+\subsection{boot\_to\_pspec}{
+Boots to pspec takes output bootstrapped files for each injection
+level and performs the second round of bootstraps.
+It used the t\_eff parameter to construct a waterfall with only the 
+effective number of free parameters from bootstraps of all
+injections. Each time in the new waterfall is chosen randomly from a 
+bootstrap file. This process is completed 100 times, then averaged
+and the standard deviation is taken to estimate the power 
+spectrum and its uncertainties.
+
+
+This script also computes the folded power spectrum, resulting in
+the only positive k-values for use in computing $\Delta^{2}$.
+}
+
+
+\subsection{sigloss\_limits}{
+Sigloss limits uses the outputs of boots to pspec to compute 
+the signal loss corrected power spectrum evaluating 
+the integral to find the probability each injected power spectrum
+value is greater than the 1-sigma upper limits of the data power
+spectrum in each k-bin.
+}
 
 \end{document}
